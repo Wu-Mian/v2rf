@@ -1,0 +1,106 @@
+name: Scheduled Pull 和 Push
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # 每小时运行一次
+  workflow_dispatch:  # 手动触发
+
+env:
+  GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+
+permissions: write-all
+
+jobs:
+  pull_and_push:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Configure Git
+      run: |
+        git config --global user.name 'github-actions[bot]'
+        git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+    - name: Backup .github directory
+      run: |
+        mkdir -p $GITHUB_WORKSPACE/backup
+        cp -r $GITHUB_WORKSPACE/.github $GITHUB_WORKSPACE/backup/
+
+    - name: Pull code from remote
+      run: |
+        git clone https://github.com/aiboboxx/v2rayfree.git $GITHUB_WORKSPACE/upstream_repo
+        cd $GITHUB_WORKSPACE/upstream_repo
+        git pull origin main --ff-only
+        wget -P $GITHUB_WORKSPACE/upstream_repo https://raw.githubusercontent.com/Pawdroid/Free-servers/main/sub
+
+    #- name: Get_youneed_nonce
+      #id: extract_nonce
+      #run: |
+        #nonce=$(curl -s 'https://www.youneed.win/free-v2ray' | \
+        #sed -n '/<script[^>]*id="passster-public-js-extra">/,/<\/script>/p' | \
+        #sed '1d;$d' | \
+        #grep -oP '(?<="nonce":")[^"]*')
+        #echo "nonce=$nonce" >> $GITHUB_ENV
+        
+    #- name: Get_youneed_V2Ray
+      #run: |
+      
+        #curl --retry 5 --retry-delay 10 --connect-timeout 20 --max-time 300 -o $GITHUB_WORKSPACE/upstream_repo/youneed.txt 'http://youneed.win/wp-admin/admin-ajax.php' --compressed -X POST \
+        #--data-raw "action=validate_input&nonce=${{ env.nonce }}&captcha=success&post_id=563&type=captcha&protection="
+        # 检查文件大小和内容是否为空
+        #file_size=$(stat -c%s "$GITHUB_WORKSPACE/upstream_repo/youneed.txt")
+        #if [ $file_size -gt 0 ] && [ -s "$GITHUB_WORKSPACE/upstream_repo/youneed.txt" ]; then
+            #echo "下载成功，文件大小为 $file_size 字节，内容非空。"
+        #else
+            #echo "下载失败或文件大小为0，内容为空。"
+        #fi
+
+
+
+    - name: Decode 和 extract ss:// lines
+      run: |
+        base64 -d $GITHUB_WORKSPACE/upstream_repo/v2 > $GITHUB_WORKSPACE/upstream_repo/v2_decoded
+        base64 -d $GITHUB_WORKSPACE/upstream_repo/sub > $GITHUB_WORKSPACE/upstream_repo/sub_decoded
+        cat $GITHUB_WORKSPACE/upstream_repo/v2_decoded $GITHUB_WORKSPACE/upstream_repo/sub_decoded > $GITHUB_WORKSPACE/upstream_repo/v2_merge
+        sort $GITHUB_WORKSPACE/upstream_repo/v2_merge | uniq > temp && mv temp $GITHUB_WORKSPACE/upstream_repo/v2_merge
+        sed -i '/127\.0\.0\.1/d' $GITHUB_WORKSPACE/upstream_repo/v2_merge
+        grep '^ss://' $GITHUB_WORKSPACE/upstream_repo/v2_merge > $GITHUB_WORKSPACE/upstream_repo/ss
+        grep -v '^ss://' $GITHUB_WORKSPACE/upstream_repo/v2_merge > $GITHUB_WORKSPACE/upstream_repo/v2_cleaned
+        base64 -w 0 $GITHUB_WORKSPACE/upstream_repo/v2_cleaned > $GITHUB_WORKSPACE/upstream_repo/v2_encode
+        
+    - name: 提取数据
+      run: |
+        # grep -oP 'data-raw=\\"([^"]+)\\"' $GITHUB_WORKSPACE/upstream_repo/youneed.txt | grep -oP '"[^"]+"' | tr -d '"' | tr -d '\' > $GITHUB_WORKSPACE/upstream_repo/youneed_data.txt || true
+        grep -oP 'data-raw=\\"\K[^"]+' $GITHUB_WORKSPACE/upstream_repo/youneed.txt | tr -d '\\' > $GITHUB_WORKSPACE/upstream_repo/youneed_data.txt
+        # grep -oP '(?<=<script[^>]*id="passster-public-js-extra">).*?(?=</script>)' $GITHUB_WORKSPACE/upstream_repo/free-v2ray.txt > $GITHUB_WORKSPACE/upstream_repo/extracted-snippet.txt
+        
+
+    - name: Restore .github directory
+      run: |
+        cp -r $GITHUB_WORKSPACE/backup/.github $GITHUB_WORKSPACE/upstream_repo/
+
+    - name: Commit 和 Push changes to your repository
+      run: |
+        cd $GITHUB_WORKSPACE/upstream_repo
+        git remote set-url origin https://github.com/Wu-Mian/FreeFQ.git
+        cp v2 v2_original
+        mv v2_cleaned v2  # Replace the original v2 file with the cleaned version
+        sed -i '2,/127\.0\.0\.1/d' README.md
+        #echo -e "所有v2ray免费节点都爬取自网络，请勿用于非法用途。\n 本仓库复刻自 aiboboxx/v2rayfree。\n ```   " | sed -i '2i /dev/stdin' README.md
+        sed -i '2i ### 所有v2ray免费节点都爬取自网络，请勿用于非法用途。\n ### 本仓库复刻自 [aiboboxx/v2rayfree](https://github.com/aiboboxx/v2rayfree)。\n ```   ' README.md
+        git add .
+        git commit -m "同步更新"
+        git push https://Wu-Mian:${{ secrets.GITHUB_TOKEN }}@github.com/Wu-Mian/FreeFQ.git main --force
+
+    - name: Clean up
+      run: |
+        rm -rf $GITHUB_WORKSPACE/backup
+        rm -rf $GITHUB_WORKSPACE/upstream_repo
+
+    - name: Delete Old Workflows
+      uses: Mattraks/delete-workflow-runs@main
+      with:
+        retain_days: 0
+        keep_minimum_runs: 1
